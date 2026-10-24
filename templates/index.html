@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My AI Assistant</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080d18; --panel:#111a2b; --line:#24334b; --blue:#58a6ff; --text:#eaf2ff; --muted:#93a4bd; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at top,#142744 0%,var(--bg) 58%); color:var(--text); font:16px system-ui,-apple-system,Segoe UI,sans-serif; display:flex; justify-content:center; padding:22px 12px; }
+    .app { width:min(760px,100%); min-height:calc(100vh - 44px); display:flex; flex-direction:column; background:rgba(13,21,36,.92); border:1px solid var(--line); border-radius:22px; overflow:hidden; box-shadow:0 18px 60px #0008; }
+    header { padding:20px 22px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
+    .orb { width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#c8f4ff,#4a9cff 40%,#1b3270 75%);box-shadow:0 0 24px #3b82f688; }
+    h1 { margin:0;font-size:20px;letter-spacing:.5px; } .sub { color:var(--muted);font-size:13px;margin-top:3px; }
+    #messages { flex:1; padding:22px; display:flex; flex-direction:column; gap:14px; overflow:auto; }
+    .msg { max-width:88%; padding:12px 15px; border-radius:16px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .bot { align-self:flex-start;background:#17243a;border:1px solid #273a56; }
+    .user { align-self:flex-end;background:#174b83;border:1px solid #2868a9; }
+    .empty { margin:auto; color:var(--muted);text-align:center;line-height:1.7; }
+    form { display:flex;gap:10px;padding:16px;border-top:1px solid var(--line);background:#0b1321; }
+    input { flex:1;min-width:0;background:#111d30;border:1px solid #2a3b56;border-radius:14px;padding:13px 15px;color:var(--text);font:inherit;outline:none; }
+    input:focus { border-color:var(--blue); } button { border:0;border-radius:13px;padding:0 18px;background:var(--blue);color:#071322;font-weight:700;font:inherit;cursor:pointer; }
+    button:disabled { opacity:.55;cursor:wait; } .note { padding:0 18px 14px;color:var(--muted);font-size:12px;text-align:center; }
+    @media(max-width:520px){body{padding:0}.app{min-height:100vh;border-radius:0;border:0}header{padding:16px}#messages{padding:16px}form{padding:12px}.msg{max-width:94%}}
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="orb" aria-hidden="true"></div>
+      <div><h1>My AI Assistant</h1><div class="sub">Gemini AI · Hindi / Hinglish support</div></div>
+    </header>
+    <section id="messages" aria-live="polite">
+      <div class="empty">Namaste! 👋<br>Apna sawal neeche likhiye.</div>
+    </section>
+    <form id="chatForm">
+      <input id="messageInput" type="text" placeholder="Message likhein…" autocomplete="off" required aria-label="Message">
+      <button id="sendButton" type="submit">Send</button>
+    </form>
+    <div class="note">AI ke jawab galat bhi ho sakte hain—zaroori baaton ko verify karein.</div>
+  </main>
+  <script>
+    const form = document.getElementById('chatForm');
+    const input = document.getElementById('messageInput');
+    const sendButton = document.getElementById('sendButton');
+    const messages = document.getElementById('messages');
+
+    function addMessage(text, role) {
+      const empty = messages.querySelector('.empty');
+      if (empty) empty.remove();
+      const bubble = document.createElement('div');
+      bubble.className = 'msg ' + role;
+      bubble.textContent = text;
+      messages.appendChild(bubble);
+      messages.scrollTop = messages.scrollHeight;
+      return bubble;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const message = input.value.trim();
+      if (!message || sendButton.disabled) return;
+      addMessage(message, 'user');
+      input.value = '';
+      sendButton.disabled = true;
+      const waiting = addMessage('Soch raha hoon…', 'bot');
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        const data = await response.json();
+        if (!response.ok || data.error) throw new Error(data.error || 'Request failed (' + response.status + ')');
+        waiting.textContent = data.response || 'Koi jawab nahi mila.';
+      } catch (error) {
+        waiting.textContent = 'Connection error: ' + error.message + '\nServer aur GOOGLE_API_KEY check karein.';
+      } finally {
+        sendButton.disabled = false;
+        input.focus();
+        messages.scrollTop = messages.scrollHeight;
+      }
+    });
+  </script>
+</body>
+</html>
