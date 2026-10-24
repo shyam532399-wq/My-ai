@@ -1,0 +1,49 @@
+name: Python FastAPI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q app.py
+
+      - name: Smoke test FastAPI app
+        env:
+          GOOGLE_API_KEY: ci-placeholder-key
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from app import app
+
+          assert Path("templates/index.html").is_file(), "templates/index.html is missing"
+
+          paths = {route.path for route in app.routes}
+          assert "/" in paths, "Home page route is missing"
+          assert "/api/chat" in paths, "Chat API route is missing"
+          assert "/ws/live" in paths, "Live voice WebSocket route is missing"
+
+          print("FastAPI import and route checks passed.")
+          PY
