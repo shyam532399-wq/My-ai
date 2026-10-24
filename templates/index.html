@@ -1,86 +1,146 @@
 <!DOCTYPE html>
-<html lang="hi">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My AI Assistant</title>
-  <style>
-    :root { color-scheme: dark; --bg:#080d18; --panel:#111a2b; --line:#24334b; --blue:#58a6ff; --text:#eaf2ff; --muted:#93a4bd; }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at top,#142744 0%,var(--bg) 58%); color:var(--text); font:16px system-ui,-apple-system,Segoe UI,sans-serif; display:flex; justify-content:center; padding:22px 12px; }
-    .app { width:min(760px,100%); min-height:calc(100vh - 44px); display:flex; flex-direction:column; background:rgba(13,21,36,.92); border:1px solid var(--line); border-radius:22px; overflow:hidden; box-shadow:0 18px 60px #0008; }
-    header { padding:20px 22px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
-    .orb { width:46px;height:46px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#c8f4ff,#4a9cff 40%,#1b3270 75%);box-shadow:0 0 24px #3b82f688; }
-    h1 { margin:0;font-size:20px;letter-spacing:.5px; } .sub { color:var(--muted);font-size:13px;margin-top:3px; }
-    #messages { flex:1; padding:22px; display:flex; flex-direction:column; gap:14px; overflow:auto; }
-    .msg { max-width:88%; padding:12px 15px; border-radius:16px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .bot { align-self:flex-start;background:#17243a;border:1px solid #273a56; }
-    .user { align-self:flex-end;background:#174b83;border:1px solid #2868a9; }
-    .empty { margin:auto; color:var(--muted);text-align:center;line-height:1.7; }
-    form { display:flex;gap:10px;padding:16px;border-top:1px solid var(--line);background:#0b1321; }
-    input { flex:1;min-width:0;background:#111d30;border:1px solid #2a3b56;border-radius:14px;padding:13px 15px;color:var(--text);font:inherit;outline:none; }
-    input:focus { border-color:var(--blue); } button { border:0;border-radius:13px;padding:0 18px;background:var(--blue);color:#071322;font-weight:700;font:inherit;cursor:pointer; }
-    button:disabled { opacity:.55;cursor:wait; } .note { padding:0 18px 14px;color:var(--muted);font-size:12px;text-align:center; }
-    @media(max-width:520px){body{padding:0}.app{min-height:100vh;border-radius:0;border:0}header{padding:16px}#messages{padding:16px}form{padding:12px}.msg{max-width:94%}}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Voice &amp; Chat Assistant</title>
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-  <main class="app">
-    <header>
-      <div class="orb" aria-hidden="true"></div>
-      <div><h1>My AI Assistant</h1><div class="sub">Gemini AI · Hindi / Hinglish support</div></div>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4">
+    <header class="w-full max-w-2xl text-center py-4 border-b border-gray-800">
+        <h1 class="text-2xl font-bold text-indigo-400">Live AI Assistant</h1>
+        <p class="text-xs text-gray-400 mt-1">Realtime Voice (Zero Beep) &amp; Text Mode</p>
     </header>
-    <section id="messages" aria-live="polite">
-      <div class="empty">Namaste! 👋<br>Apna sawal neeche likhiye.</div>
-    </section>
-    <form id="chatForm">
-      <input id="messageInput" type="text" placeholder="Message likhein…" autocomplete="off" required aria-label="Message">
-      <button id="sendButton" type="submit">Send</button>
-    </form>
-    <div class="note">AI ke jawab galat bhi ho sakte hain—zaroori baaton ko verify karein.</div>
-  </main>
-  <script>
-    const form = document.getElementById('chatForm');
-    const input = document.getElementById('messageInput');
-    const sendButton = document.getElementById('sendButton');
-    const messages = document.getElementById('messages');
 
-    function addMessage(text, role) {
-      const empty = messages.querySelector('.empty');
-      if (empty) empty.remove();
-      const bubble = document.createElement('div');
-      bubble.className = 'msg ' + role;
-      bubble.textContent = text;
-      messages.appendChild(bubble);
-      messages.scrollTop = messages.scrollHeight;
-      return bubble;
-    }
+    <div class="my-6 flex gap-4">
+        <button id="liveVoiceBtn" onclick="toggleLiveVoice()" class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-full font-semibold transition flex items-center gap-2">
+            <span id="voiceIcon">🎙️</span>
+            <span id="voiceStatus">Start Live Voice</span>
+        </button>
+    </div>
 
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const message = input.value.trim();
-      if (!message || sendButton.disabled) return;
-      addMessage(message, 'user');
-      input.value = '';
-      sendButton.disabled = true;
-      const waiting = addMessage('Soch raha hoon…', 'bot');
-      try {
-        const response = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message })
-        });
-        const data = await response.json();
-        if (!response.ok || data.error) throw new Error(data.error || 'Request failed (' + response.status + ')');
-        waiting.textContent = data.response || 'Koi jawab nahi mila.';
-      } catch (error) {
-        waiting.textContent = 'Connection error: ' + error.message + '\nServer aur GOOGLE_API_KEY check karein.';
-      } finally {
-        sendButton.disabled = false;
-        input.focus();
-        messages.scrollTop = messages.scrollHeight;
-      }
-    });
-  </script>
+    <main class="w-full max-w-2xl flex-1 bg-gray-800 rounded-lg p-4 flex flex-col justify-between overflow-hidden shadow-lg border border-gray-700">
+        <div id="chatContainer" class="flex-1 overflow-y-auto space-y-4 pr-2 mb-4 max-h-[60vh]">
+            <div class="bg-gray-700 p-3 rounded-lg max-w-[80%]">
+                Hello! Main live voice aur text dono samajh sakta hoon. Kaho, kya madad karoon?
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <input type="text" id="userInput" placeholder="Kuch poochhein..." class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500" onkeydown="if(event.key === 'Enter') sendMessage()">
+            <button onclick="sendMessage()" class="bg-indigo-600 hover:bg-indigo-700 px-4 py-2 rounded-lg font-medium transition">Send</button>
+        </div>
+    </main>
+
+    <script>
+        let ws = null, audioCtx = null, micStream = null, isLive = false;
+
+        async function sendMessage() {
+            const input = document.getElementById("userInput");
+            const text = input.value.trim();
+            if (!text) return;
+
+            appendMessage("User", text, "bg-indigo-600 self-end ml-auto");
+            input.value = "";
+
+            try {
+                const res = await fetch("/api/chat", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                if (data.response) appendMessage("AI", data.response, "bg-gray-700");
+                else appendMessage("AI", "Error: " + data.error, "bg-red-900");
+            } catch (err) {
+                appendMessage("AI", "Connection Error", "bg-red-900");
+            }
+        }
+
+        function appendMessage(sender, text, classes) {
+            const container = document.getElementById("chatContainer");
+            const msgDiv = document.createElement("div");
+            msgDiv.className = `p-3 rounded-lg max-w-[80%] ${classes}`;
+            msgDiv.innerText = text;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function toggleLiveVoice() {
+            const btn = document.getElementById("liveVoiceBtn");
+            const status = document.getElementById("voiceStatus");
+
+            if (isLive) {
+                if (ws) ws.close();
+                if (micStream) micStream.getTracks().forEach(track => track.stop());
+                if (audioCtx) await audioCtx.close();
+                isLive = false;
+                btn.classList.replace("bg-red-600", "bg-indigo-600");
+                status.innerText = "Start Live Voice";
+                return;
+            }
+
+            try {
+                const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+                ws = new WebSocket(`${protocol}://${window.location.host}/ws/live`);
+                ws.binaryType = "arraybuffer";
+
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                let nextStartTime = 0;
+
+                ws.onmessage = async (event) => {
+                    const audioBuffer = await decodePCM(event.data, audioCtx, 24000);
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(audioCtx.destination);
+                    const currentTime = audioCtx.currentTime;
+                    if (nextStartTime < currentTime) nextStartTime = currentTime;
+                    source.start(nextStartTime);
+                    nextStartTime += audioBuffer.duration;
+                };
+
+                micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
+                const sourceNode = audioCtx.createMediaStreamSource(micStream);
+                const processor = audioCtx.createScriptProcessor(2048, 1, 1);
+
+                processor.onaudioprocess = (e) => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                        const inputData = e.inputBuffer.getChannelData(0);
+                        const pcmData = convertFloat32ToInt16(inputData);
+                        ws.send(pcmData.buffer);
+                    }
+                };
+
+                sourceNode.connect(processor);
+                processor.connect(audioCtx.destination);
+                isLive = true;
+                btn.classList.replace("bg-indigo-600", "bg-red-600");
+                status.innerText = "Listening... (Click to Stop)";
+            } catch (err) {
+                console.error("Mic Access Error:", err);
+                alert("Microphone permission zaroori hai!");
+            }
+        }
+
+        function convertFloat32ToInt16(buffer) {
+            let l = buffer.length;
+            let buf = new Int16Array(l);
+            while (l--) {
+                let s = Math.max(-1, Math.min(1, buffer[l]));
+                buf[l] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+            return buf;
+        }
+
+        async function decodePCM(arrayBuffer, ctx, sampleRate) {
+            const int16Array = new Int16Array(arrayBuffer);
+            const float32Array = new Float32Array(int16Array.length);
+            for (let i = 0; i < int16Array.length; i++) {
+                float32Array[i] = int16Array[i] / (int16Array[i] < 0 ? 0x8000 : 0x7FFF);
+            }
+            const buffer = ctx.createBuffer(1, float32Array.length, sampleRate);
+            buffer.getChannelData(0).set(float32Array);
+            return buffer;
+        }
+    </script>
 </body>
 </html>
