@@ -151,7 +151,7 @@ private fun DefulterApp() {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("AI COMMUNICATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
             Spacer(Modifier.weight(1f))
-            Text("TEXT MODE", color = Muted, fontSize = 9.sp)
+            Text("VOICE + TEXT MODE", color = Muted, fontSize = 9.sp)
         }
         Spacer(Modifier.height(6.dp))
 
@@ -240,7 +240,7 @@ private fun DefulterApp() {
             persistChat(lines, prefs)
         }) { Text("CLEAR CHAT MEMORY", color = Muted, fontSize = 9.sp) }
         Text(
-            "MAYA-INSPIRED HUD  •  ANDROID BUILD  •  VOICE MODULE NOT YET ENABLED",
+            "MAYA-INSPIRED HUD  •  HINDI VOICE INPUT  •  SPOKEN AI REPLIES",
             modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
             color = Muted, fontSize = 8.sp, letterSpacing = 0.5.sp
         )
@@ -403,9 +403,9 @@ private fun persistChat(lines: List<ChatLine>, prefs: android.content.SharedPref
     prefs.edit().putString("chat_history", array.toString()).apply()
 }
 
-private fun startSpeechRecognition(context: Context, onResult: (String) -> Unit, onError: (String) -> Unit) {
+private fun startSpeechRecognition(context: Context, onResult: (String) -> Unit, onFailure: (String) -> Unit) {
     if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-        onError("Is device par speech recognition available nahi hai.")
+        onFailure("Is device par speech recognition available nahi hai.")
         return
     }
     val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
@@ -415,11 +415,11 @@ private fun startSpeechRecognition(context: Context, onResult: (String) -> Unit,
         override fun onRmsChanged(rmsdB: Float) {}
         override fun onBufferReceived(buffer: ByteArray?) {}
         override fun onEndOfSpeech() {}
-        override fun onError(error: Int) { recognizer.destroy(); onError("Voice input error. Dobara try karein.") }
+        override fun onError(error: Int) { recognizer.destroy(); onFailure("Voice input error. Dobara try karein.") }
         override fun onResults(results: Bundle?) {
             val result = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
             recognizer.destroy()
-            if (!result.isNullOrBlank()) onResult(result) else onError("Koi speech samajh nahi aayi.")
+            if (!result.isNullOrBlank()) onResult(result) else onFailure("Koi speech samajh nahi aayi.")
         }
         override fun onPartialResults(partialResults: Bundle?) {}
         override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -432,6 +432,6 @@ private fun startSpeechRecognition(context: Context, onResult: (String) -> Unit,
     }
     runCatching { recognizer.startListening(intent) }.onFailure {
         recognizer.destroy()
-        onError("Microphone start nahi ho paya.")
+        onFailure("Microphone start nahi ho paya.")
     }
 }
