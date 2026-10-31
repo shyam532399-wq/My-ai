@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">DEFULTER AI</string>
+    <string name="accessibility_description">Accessibility helper for DEFULTER AI. It does not collect screen content.</string>
 </resources>
