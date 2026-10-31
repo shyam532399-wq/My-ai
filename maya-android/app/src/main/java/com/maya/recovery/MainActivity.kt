@@ -1,24 +1,23 @@
 package com.maya.recovery
 
-import android.Manifest
 import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.os.PowerManager
-import android.provider.Settings
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -26,12 +25,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,153 +45,248 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Locale
+import java.util.concurrent.TimeUnit
 
-private val Navy = Color(0xFF080D1D)
-private val Panel = Color(0xFF111B35)
+private val Background = Color(0xFF050912)
+private val Panel = Color(0xD9101B30)
+private val Cyan = Color(0xFF00C8FF)
 private val Blue = Color(0xFF4778FF)
-private val Muted = Color(0xFF9BA9C7)
+private val Muted = Color(0xFF91A7C5)
+private val httpClient = OkHttpClient.Builder()
+    .callTimeout(35, TimeUnit.SECONDS)
+    .build()
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { MaterialTheme(colorScheme = darkColorScheme(
-            background = Navy, surface = Panel, primary = Blue,
-            onBackground = Color.White, onSurface = Color.White
-        )) { MayaApp(this) } }
+        window.statusBarColor = android.graphics.Color.rgb(5, 9, 18)
+        window.navigationBarColor = android.graphics.Color.rgb(5, 9, 18)
+        setContent {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    background = Background,
+                    surface = Panel,
+                    primary = Cyan,
+                    secondary = Blue,
+                    onBackground = Color.White,
+                    onSurface = Color.White
+                )
+            ) { DefulterApp() }
+        }
     }
 }
 
 private data class ChatLine(val from: String, val text: String)
 
 @Composable
-private fun MayaApp(activity: Activity) {
+private fun DefulterApp() {
     val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("maya_local", Context.MODE_PRIVATE) }
+    val prefs = remember { context.getSharedPreferences("defulter_local", Context.MODE_PRIVATE) }
     var apiKey by remember { mutableStateOf(prefs.getString("gemini_key", "") ?: "") }
     var keyInput by remember { mutableStateOf(apiKey) }
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    var showSetup by remember { mutableStateOf(!prefs.getBoolean("setup_done", false)) }
-    val lines = remember { mutableStateListOf(ChatLine("Maya", "Namaste! Main Maya hoon. Aap text chat shuru kar sakte hain.")) }
+    val lines = remember {
+        mutableStateListOf(ChatLine("DEFULTER AI", "Namaste! Main DEFULTER AI hoon. Apna Gemini API key save karke chat shuru karein."))
+    }
     val scope = rememberCoroutineScope()
 
     Column(
-        Modifier.fillMaxSize().background(Navy).padding(horizontal = 18.dp, vertical = 16.dp)
+        Modifier.fillMaxSize().background(
+            Brush.verticalGradient(listOf(Color(0xFF071426), Background, Color(0xFF03060D)))
+        ).padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text("M A Y A", color = Blue, style = MaterialTheme.typography.labelLarge)
-        Text(if (showSetup) "Set up Maya" else "Your AI companion", style = MaterialTheme.typography.headlineSmall, color = Color.White)
-        Text(if (showSetup) "Allow only the Android access you want Maya to use." else "Private on-device settings • Gemini text connection", color = Muted, style = MaterialTheme.typography.bodySmall)
-        Spacer(Modifier.height(16.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("D E F U L T E R   A I", color = Cyan, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("PERSONAL INTELLIGENCE SYSTEM", color = Muted, fontSize = 9.sp, letterSpacing = 1.5.sp)
+            }
+            StatusPill(if (busy) "PROCESSING" else if (apiKey.isBlank()) "CORE STANDBY" else "CORE READY")
+        }
 
-        if (showSetup) {
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                item { PermissionCard("Microphone", "Use voice input when you choose to speak.") { requestPermission(activity, Manifest.permission.RECORD_AUDIO, 101) } }
-                item { PermissionCard("Notifications", "Allow Maya notifications on Android 13 and newer.") {
-                    if (Build.VERSION.SDK_INT >= 33) requestPermission(activity, Manifest.permission.POST_NOTIFICATIONS, 102)
-                    else toast(context, "Notification runtime permission is not required on this Android version.")
-                } }
-                item { PermissionCard("Contacts", "Only needed for contact-related commands.") { requestPermission(activity, Manifest.permission.READ_CONTACTS, 103) } }
-                item { PermissionCard("Camera", "Only needed for camera-based features.") { requestPermission(activity, Manifest.permission.CAMERA, 104) } }
-                item { PermissionCard("Display over other apps", "Open Android settings to grant overlay access.") {
-                    openSetting(activity, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${activity.packageName}")))
-                } }
-                item { PermissionCard("Battery optimization", "Allow background reliability where Android permits it.") {
-                    if (Build.VERSION.SDK_INT >= 23) openSetting(activity, Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:${activity.packageName}")))
-                } }
-                item { PermissionCard("Accessibility service", "Optional integration. This build does not read screen content.") {
-                    openSetting(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                } }
-            }
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = {
-                prefs.edit().putBoolean("setup_done", true).apply()
-                showSetup = false
-            }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
-                Text("Continue")
-            }
-            TextButton(onClick = { showSetup = false }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                Text("Skip optional setup", color = Muted)
-            }
-        } else {
-            OutlinedTextField(
-                value = keyInput, onValueChange = { keyInput = it },
-                label = { Text("Gemini API key") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth()
+        Spacer(Modifier.height(10.dp))
+        HudOrb()
+        Spacer(Modifier.height(8.dp))
+
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetricCard("SYSTEM", "READY", Modifier.weight(1f))
+            MetricCard("VOICE", "NOT SET UP", Modifier.weight(1f))
+            MetricCard("NETWORK", if (apiKey.isBlank()) "OFFLINE" else "CONFIGURED", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(10.dp))
+
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("AI COMMUNICATION", color = Cyan, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            Spacer(Modifier.weight(1f))
+            Text("TEXT MODE", color = Muted, fontSize = 9.sp)
+        }
+        Spacer(Modifier.height(6.dp))
+
+        OutlinedTextField(
+            value = keyInput,
+            onValueChange = { keyInput = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Gemini API key") },
+            placeholder = { Text("Paste your API key") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Cyan,
+                unfocusedBorderColor = Color(0xFF29415D),
+                focusedLabelColor = Cyan
             )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = {
-                    apiKey = keyInput.trim()
-                    prefs.edit().putString("gemini_key", apiKey).apply()
-                    toast(context, "API key saved on this device.")
-                }) { Text("Save key") }
-                TextButton(onClick = { showSetup = true }) { Text("Permissions") }
-            }
-            LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(lines) { line ->
-                    Column(
-                        Modifier.fillMaxWidth().background(if (line.from == "You") Blue.copy(alpha = 0.25f) else Panel, RoundedCornerShape(14.dp)).padding(12.dp)
-                    ) {
-                        Text(line.from, color = if (line.from == "You") Color(0xFF9DB7FF) else Blue, style = MaterialTheme.typography.labelSmall)
-                        Text(line.text, color = Color.White)
-                    }
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = {
+                apiKey = keyInput.trim()
+                prefs.edit().putString("gemini_key", apiKey).apply()
+                Toast.makeText(context, "API key saved on this device", Toast.LENGTH_SHORT).show()
+            }) { Text("SAVE KEY", color = Cyan, fontSize = 11.sp) }
+        }
+
+        LazyColumn(
+            modifier = Modifier.weight(1f).fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color(0x99101B30))
+                .border(1.dp, Color(0x553A7198), RoundedCornerShape(14.dp))
+                .padding(9.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(lines) { line ->
+                val mine = line.from == "YOU"
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(if (mine) Color(0x443C70D8) else Color(0xAA0A1425), RoundedCornerShape(11.dp))
+                        .padding(10.dp)
+                ) {
+                    Text(line.from, color = if (mine) Color(0xFF9DB7FF) else Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(3.dp))
+                    Text(line.text, color = Color.White, fontSize = 13.sp, lineHeight = 19.sp)
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            OutlinedTextField(
-                value = message, onValueChange = { message = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Maya se kuch poochhein...") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = {
-                    sendToMaya(message, apiKey, lines, { message = "" }, { busy = it }, scope, context)
-                })
+        }
+
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = message,
+            onValueChange = { message = it },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("Message DEFULTER AI...", color = Muted) },
+            shape = RoundedCornerShape(14.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = {
+                sendToDefulter(message, apiKey, lines, { message = "" }, { busy = it }, scope, context)
+            }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Cyan,
+                unfocusedBorderColor = Color(0xFF29415D)
             )
-            Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { sendToMaya(message, apiKey, lines, { message = "" }, { busy = it }, scope, context) },
-                enabled = !busy && message.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)
-            ) { Text(if (busy) "Connecting..." else "Send") }
-            Text("Voice wake-word and Gemini Live are not enabled in this recovery milestone.", color = Muted, style = MaterialTheme.typography.labelSmall)
+        )
+        Spacer(Modifier.height(7.dp))
+        Button(
+            onClick = { sendToDefulter(message, apiKey, lines, { message = "" }, { busy = it }, scope, context) },
+            enabled = !busy && message.isNotBlank(),
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(13.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF12618A))
+        ) {
+            Text(if (busy) "CONNECTING TO AI CORE..." else "SEND MESSAGE", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        }
+        Text(
+            "MAYA-INSPIRED HUD  •  ANDROID BUILD  •  VOICE MODULE NOT YET ENABLED",
+            modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
+            color = Muted, fontSize = 8.sp, letterSpacing = 0.5.sp
+        )
+    }
+}
+
+@Composable
+private fun HudOrb() {
+    val transition = rememberInfiniteTransition(label = "orb")
+    val pulse by transition.animateFloat(
+        initialValue = 0.91f,
+        targetValue = 1.07f,
+        animationSpec = infiniteRepeatable(tween(1800), RepeatMode.Reverse),
+        label = "pulse"
+    )
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(12000)),
+        label = "rotation"
+    )
+    Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(188.dp)) {
+            val c = center
+            val radius = size.minDimension * 0.37f * pulse
+            drawCircle(
+                Brush.radialGradient(
+                    listOf(Color(0xAA00D9FF), Color(0x553B70FF), Color.Transparent),
+                    center = c,
+                    radius = radius * 1.65f
+                ),
+                radius = radius * 1.65f
+            )
+            drawCircle(
+                Brush.radialGradient(
+                    listOf(Color(0xFFB9F8FF), Color(0xFF168DCC), Color(0xFF07152F)),
+                    center = c,
+                    radius = radius
+                ),
+                radius = radius
+            )
+            drawCircle(Color(0x9900E5FF), radius * 1.18f, style = Stroke(width = 1.5.dp.toPx()))
+            drawArc(
+                color = Color(0xFF9AF4FF),
+                startAngle = rotation,
+                sweepAngle = 105f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(c.x - radius * 1.35f, c.y - radius * 1.35f),
+                size = androidx.compose.ui.geometry.Size(radius * 2.7f, radius * 2.7f),
+                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
+            )
+            drawArc(
+                color = Color(0x887B9CFF),
+                startAngle = rotation + 180f,
+                sweepAngle = 75f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(c.x - radius * 1.48f, c.y - radius * 1.48f),
+                size = androidx.compose.ui.geometry.Size(radius * 2.96f, radius * 2.96f),
+                style = Stroke(width = 1.dp.toPx(), cap = StrokeCap.Round)
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("DEFULTER", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            Text("AI CORE", color = Color(0xFFB8F5FF), fontSize = 9.sp, letterSpacing = 3.sp)
         }
     }
 }
 
 @Composable
-private fun PermissionCard(title: String, detail: String, action: () -> Unit) {
+private fun StatusPill(value: String) {
+    Text(
+        "● $value",
+        modifier = Modifier.clip(CircleShape).background(Color(0x3322DDAA)).padding(horizontal = 10.dp, vertical = 7.dp),
+        color = Color(0xFF62E6C0), fontSize = 9.sp, fontWeight = FontWeight.Bold
+    )
+}
+
+@Composable
+private fun MetricCard(label: String, value: String, modifier: Modifier = Modifier) {
     Column(
-        Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(14.dp)).padding(14.dp)
+        modifier.clip(RoundedCornerShape(10.dp))
+            .background(Panel)
+            .border(1.dp, Color(0x553A7198), RoundedCornerShape(10.dp))
+            .padding(horizontal = 9.dp, vertical = 10.dp)
     ) {
-        Text(title, color = Color.White, style = MaterialTheme.typography.titleMedium)
+        Text(label, color = Muted, fontSize = 8.sp, letterSpacing = 1.sp)
         Spacer(Modifier.height(4.dp))
-        Text(detail, color = Muted, style = MaterialTheme.typography.bodySmall)
-        TextButton(onClick = action, modifier = Modifier.align(Alignment.End)) { Text("Enable", color = Blue) }
+        Text(value, color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
     }
 }
 
-private fun requestPermission(activity: Activity, permission: String, requestCode: Int) {
-    if (ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED) {
-        toast(activity, "Permission already enabled.")
-    } else {
-        if (Build.VERSION.SDK_INT >= 23) activity.requestPermissions(arrayOf(permission), requestCode)
-    }
-}
-
-private fun openSetting(activity: Activity, intent: Intent) {
-    try { activity.startActivity(intent) }
-    catch (_: Exception) { toast(activity, "This Android setting is not available on this device.") }
-}
-
-private fun toast(context: Context, text: String) {
-    Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
-}
-
-private fun sendToMaya(
+private fun sendToDefulter(
     raw: String,
     key: String,
     lines: MutableList<ChatLine>,
@@ -199,38 +298,44 @@ private fun sendToMaya(
     val prompt = raw.trim()
     if (prompt.isEmpty()) return
     if (key.isBlank()) {
-        toast(context, "Pehle Gemini API key save karein.")
+        Toast.makeText(context, "Pehle Gemini API key save karein.", Toast.LENGTH_SHORT).show()
         return
     }
-    lines.add(ChatLine("You", prompt))
+    lines.add(ChatLine("YOU", prompt))
     clearInput()
     setBusy(true)
     scope.launch {
         val answer = withContext(Dispatchers.IO) {
             try {
-                val body = JSONObject().put("contents", JSONArray().put(
-                    JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", prompt)))
-                )).toString()
+                val body = JSONObject().put(
+                    "contents",
+                    JSONArray().put(
+                        JSONObject().put("role", "user").put(
+                            "parts", JSONArray().put(JSONObject().put("text", prompt))
+                        )
+                    )
+                ).toString()
                 val request = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + key)
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$key")
                     .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
                     .build()
-                OkHttpClient().newCall(request).execute().use { response ->
-                    val rawBody = response.body?.string().orEmpty()
-                    if (!response.isSuccessful) "Gemini error ${response.code}: ${rawBody.take(300)}"
-                    else {
-                        val root = JSONObject(rawBody)
+                httpClient.newCall(request).execute().use { response ->
+                    val responseText = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) {
+                        "AI service error ${response.code}: ${responseText.take(240)}"
+                    } else {
+                        val root = JSONObject(responseText)
                         root.optJSONArray("candidates")?.optJSONObject(0)
                             ?.optJSONObject("content")?.optJSONArray("parts")
                             ?.optJSONObject(0)?.optString("text")
-                            ?: "Maya ko is baar readable response nahi mila."
+                            ?: "AI service ne is baar readable response nahi diya."
                     }
                 }
-            } catch (e: Exception) {
-                "Connection error: ${e.message ?: "Unknown error"}"
+            } catch (error: Exception) {
+                "Connection error: ${error.message ?: "Unknown error"}"
             }
         }
-        lines.add(ChatLine("Maya", answer))
+        lines.add(ChatLine("DEFULTER AI", answer))
         setBusy(false)
     }
 }
