@@ -1,11 +1,18 @@
 package com.maya.recovery
 
-import android.app.Activity
+import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -45,6 +52,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 private val Background = Color(0xFF050912)
@@ -53,7 +61,7 @@ private val Cyan = Color(0xFF00C8FF)
 private val Blue = Color(0xFF4778FF)
 private val Muted = Color(0xFF91A7C5)
 private val httpClient = OkHttpClient.Builder()
-    .callTimeout(35, TimeUnit.SECONDS)
+    .callTimeout(90, TimeUnit.SECONDS)
     .build()
 
 class MainActivity : ComponentActivity() {
@@ -87,9 +95,34 @@ private fun DefulterApp() {
     var message by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val lines = remember {
-        mutableStateListOf(ChatLine("DEFULTER AI", "Namaste! Main DEFULTER AI hoon. Apna Gemini API key save karke chat shuru karein."))
+        mutableStateListOf<ChatLine>().apply {
+            val saved = prefs.getString("chat_history", null)
+            if (!saved.isNullOrBlank()) runCatching {
+                val array = JSONArray(saved)
+                for (i in 0 until array.length()) {
+                    val item = array.getJSONObject(i)
+                    add(ChatLine(item.optString("from"), item.optString("text")))
+                }
+            }
+            if (isEmpty()) add(ChatLine("DEFULTER AI", "Namaste! Main DEFULTER AI hoon. API key save karke chat shuru karein."))
+        }
     }
+    var listening by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val speechEngine = remember { TextToSpeech(context) { } }
+    DisposableEffect(speechEngine) {
+        onDispose { speechEngine.stop(); speechEngine.shutdown() }
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startSpeechRecognition(context, { message = it; listening = false }, { listening = false; Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
+        else Toast.makeText(context, "Voice ke liye microphone permission zaroori hai.", Toast.LENGTH_LONG).show()
+    }
+    val speakReply: (String) -> Unit = { reply ->
+        runCatching {
+            speechEngine.language = Locale("hi", "IN")
+            speechEngine.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "defulter-reply")
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().background(
@@ -110,8 +143,8 @@ private fun DefulterApp() {
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MetricCard("SYSTEM", "READY", Modifier.weight(1f))
-            MetricCard("VOICE", "NOT SET UP", Modifier.weight(1f))
-            MetricCard("NETWORK", if (apiKey.isBlank()) "OFFLINE" else "CONFIGURED", Modifier.weight(1f))
+            MetricCard("VOICE", if (listening) "LISTENING" else "TAP TO TALK", Modifier.weight(1f))
+            MetricCard("MEMORY", "${lines.size} SAVED", Modifier.weight(1f))
         }
         Spacer(Modifier.height(10.dp))
 
@@ -176,7 +209,7 @@ private fun DefulterApp() {
             shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = {
-                sendToDefulter(message, apiKey, lines, { message = "" }, { busy = it }, scope, context)
+                sendToDefulter(message, apiKey, lines, prefs, { message = "" }, { busy = it }, speakReply, scope, context)
             }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Cyan,
@@ -184,15 +217,28 @@ private fun DefulterApp() {
             )
         )
         Spacer(Modifier.height(7.dp))
-        Button(
-            onClick = { sendToDefulter(message, apiKey, lines, { message = "" }, { busy = it }, scope, context) },
-            enabled = !busy && message.isNotBlank(),
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(13.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF12618A))
-        ) {
-            Text(if (busy) "CONNECTING TO AI CORE..." else "SEND MESSAGE", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = { micPermission.launch(Manifest.permission.RECORD_AUDIO) },
+                enabled = !busy && !listening,
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(13.dp)
+            ) { Text(if (listening) "LISTENING..." else "🎙 VOICE", color = Cyan) }
+            Button(
+                onClick = { sendToDefulter(message, apiKey, lines, prefs, { message = "" }, { busy = it }, speakReply, scope, context) },
+                enabled = !busy && message.isNotBlank(),
+                modifier = Modifier.weight(1.3f).height(48.dp),
+                shape = RoundedCornerShape(13.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF12618A))
+            ) {
+                Text(if (busy) "THINKING..." else "SEND MESSAGE", fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            }
         }
+        TextButton(onClick = {
+            lines.clear()
+            lines.add(ChatLine("DEFULTER AI", "Chat memory cleared. Nayi conversation shuru karein."))
+            persistChat(lines, prefs)
+        }) { Text("CLEAR CHAT MEMORY", color = Muted, fontSize = 9.sp) }
         Text(
             "MAYA-INSPIRED HUD  •  ANDROID BUILD  •  VOICE MODULE NOT YET ENABLED",
             modifier = Modifier.fillMaxWidth().padding(top = 7.dp),
@@ -290,8 +336,10 @@ private fun sendToDefulter(
     raw: String,
     key: String,
     lines: MutableList<ChatLine>,
+    prefs: android.content.SharedPreferences,
     clearInput: () -> Unit,
     setBusy: (Boolean) -> Unit,
+    speakReply: (String) -> Unit,
     scope: kotlinx.coroutines.CoroutineScope,
     context: Context
 ) {
@@ -302,21 +350,27 @@ private fun sendToDefulter(
         return
     }
     lines.add(ChatLine("YOU", prompt))
+    persistChat(lines, prefs)
     clearInput()
     setBusy(true)
     scope.launch {
         val answer = withContext(Dispatchers.IO) {
             try {
-                val body = JSONObject().put(
-                    "contents",
-                    JSONArray().put(
-                        JSONObject().put("role", "user").put(
-                            "parts", JSONArray().put(JSONObject().put("text", prompt))
-                        )
-                    )
-                ).toString()
+                val contents = JSONArray()
+                lines.takeLast(24).forEach { line ->
+                    contents.put(JSONObject().put("role", if (line.from == "YOU") "user" else "model")
+                        .put("parts", JSONArray().put(JSONObject().put("text", line.text))))
+                }
+                val body = JSONObject()
+                    .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put(
+                        "text", "You are DEFULTER AI, a helpful and honest personal assistant. Understand Hindi, Hinglish and English. Reply in the user's language. Never claim an action was done unless it was actually done."
+                    ))))
+                    .put("contents", contents)
+                    .put("generationConfig", JSONObject().put("temperature", 0.7).put("maxOutputTokens", 8192))
+                    .toString()
                 val request = Request.Builder()
-                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$key")
+                    .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent")
+                    .header("x-goog-api-key", key)
                     .post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
                     .build()
                 httpClient.newCall(request).execute().use { response ->
@@ -336,6 +390,48 @@ private fun sendToDefulter(
             }
         }
         lines.add(ChatLine("DEFULTER AI", answer))
+        persistChat(lines, prefs)
         setBusy(false)
+        if (!answer.startsWith("AI service error") && !answer.startsWith("Connection error")) speakReply(answer)
+    }
+}
+
+
+private fun persistChat(lines: List<ChatLine>, prefs: android.content.SharedPreferences) {
+    val array = JSONArray()
+    lines.forEach { array.put(JSONObject().put("from", it.from).put("text", it.text)) }
+    prefs.edit().putString("chat_history", array.toString()).apply()
+}
+
+private fun startSpeechRecognition(context: Context, onResult: (String) -> Unit, onError: (String) -> Unit) {
+    if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        onError("Is device par speech recognition available nahi hai.")
+        return
+    }
+    val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+    recognizer.setRecognitionListener(object : RecognitionListener {
+        override fun onReadyForSpeech(params: Bundle?) {}
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {}
+        override fun onError(error: Int) { recognizer.destroy(); onError("Voice input error. Dobara try karein.") }
+        override fun onResults(results: Bundle?) {
+            val result = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+            recognizer.destroy()
+            if (!result.isNullOrBlank()) onResult(result) else onError("Koi speech samajh nahi aayi.")
+        }
+        override fun onPartialResults(partialResults: Bundle?) {}
+        override fun onEvent(eventType: Int, params: Bundle?) {}
+    })
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+    }
+    runCatching { recognizer.startListening(intent) }.onFailure {
+        recognizer.destroy()
+        onError("Microphone start nahi ho paya.")
     }
 }
