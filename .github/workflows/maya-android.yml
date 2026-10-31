@@ -1,4 +1,4 @@
-name: Maya Android Debug APK
+name: DEFULTER AI Android Debug APK
 
 on:
   push:
@@ -25,12 +25,12 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.7"
-      - name: Build debug APK
+      - name: Build DEFULTER AI debug APK
         working-directory: maya-android
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: maya-recovery-debug
+          name: defulter-ai-debug
           path: maya-android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
