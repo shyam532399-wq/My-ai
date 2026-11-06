@@ -1,6 +1,7 @@
 package com.defulter.ai
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognizerIntent
 import android.speech.tts.TextToSpeech
@@ -8,20 +9,32 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.Locale
 
 private data class ChatMessage(val text: String, val fromUser: Boolean)
+private data class PendingAction(val kind: String, val title: String, val detail: String, val value: String)
+
+private val Navy = Color(0xFF07111F)
+private val Panel = Color(0xFF101E30)
+private val Cyan = Color(0xFF66D9EF)
+private val Muted = Color(0xFF9BAEC3)
 
 class MainActivity : ComponentActivity() {
     private var tts: TextToSpeech? = null
@@ -30,182 +43,272 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("hi", "IN")
+                val result = tts?.setLanguage(Locale("hi", "IN"))
+                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
+                    tts?.language = Locale.getDefault()
+                }
             }
         }
         val prefs = getSharedPreferences("defulter_settings", MODE_PRIVATE)
 
         setContent {
+            var screen by remember { mutableStateOf("Chat") }
             val messages = remember {
                 mutableStateListOf(
-                    ChatMessage("नमस्ते! मैं DEFULTER AI हूँ। Chat शुरू करें या mic दबाकर बोलें।", false)
+                    ChatMessage("नमस्ते Boss! मैं DEFULTER AI हूँ। Chat करें या mic से बोलें। किसी भी phone action से पहले आपकी approval ली जाएगी।", false)
                 )
             }
+            val history = remember {
+                mutableStateListOf<String>().apply {
+                    val saved = prefs.getString("task_history", "[]") ?: "[]"
+                    runCatching {
+                        val arr = JSONArray(saved)
+                        for (i in 0 until arr.length()) add(arr.optString(i))
+                    }
+                }
+            }
+            val memories = remember {
+                mutableStateListOf<String>().apply {
+                    addAll(prefs.getStringSet("memories", emptySet())?.toList().orEmpty())
+                }
+            }
             var input by remember { mutableStateOf("") }
+            var memoryDraft by remember { mutableStateOf("") }
             var apiKey by remember { mutableStateOf(prefs.getString("gemini_key", "") ?: "") }
             var showSettings by remember { mutableStateOf(false) }
             var busy by remember { mutableStateOf(false) }
-            var pendingApp by remember { mutableStateOf<String?>(null) }
-            var speakReplies by remember { mutableStateOf(true) }
+            var pendingAction by remember { mutableStateOf<PendingAction?>(null) }
+            var speakReplies by remember { mutableStateOf(prefs.getBoolean("speak_replies", true)) }
             val scope = rememberCoroutineScope()
             val gemini = remember { GeminiClient() }
+
+            fun saveHistory(entry: String) {
+                history.add(0, entry)
+                while (history.size > 50) history.removeAt(history.lastIndex)
+                val arr = JSONArray()
+                history.forEach { arr.put(it) }
+                prefs.edit().putString("task_history", arr.toString()).apply()
+            }
+
+            fun addAssistant(text: String) {
+                messages.add(ChatMessage(text, false))
+                if (speakReplies) tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "defulter_reply")
+            }
 
             val voiceLauncher = rememberLauncherForActivityResult(
                 ActivityResultContracts.StartActivityForResult()
             ) { result ->
-                val spoken = result.data
-                    ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-                    ?.firstOrNull()
+                val spoken = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()
                 if (!spoken.isNullOrBlank()) input = spoken
             }
 
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFF66D9EF),
-                    background = Color(0xFF07111F),
-                    surface = Color(0xFF101E30)
+                    primary = Cyan,
+                    secondary = Color(0xFF8AA8FF),
+                    background = Navy,
+                    surface = Panel,
+                    onSurface = Color.White
                 )
             ) {
-                Scaffold(containerColor = Color(0xFF07111F)) { padding ->
-                    Column(
-                        modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("DEFULTER AI", style = MaterialTheme.typography.headlineSmall, color = Color.White)
-                                Text(
-                                    "VOICE  •  CHAT  •  APPROVAL AUTOMATION",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color(0xFF66D9EF)
+                Scaffold(
+                    containerColor = Navy,
+                    bottomBar = {
+                        NavigationBar(containerColor = Panel, contentColor = Color.White) {
+                            listOf("Chat", "Memory", "History").forEach { tab ->
+                                NavigationBarItem(
+                                    selected = screen == tab,
+                                    onClick = { screen = tab },
+                                    icon = { Text(when (tab) { "Chat" -> "◉"; "Memory" -> "✧"; else -> "◷" }) },
+                                    label = { Text(tab) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = Cyan,
+                                        selectedTextColor = Cyan,
+                                        indicatorColor = Color(0xFF203B55),
+                                        unselectedTextColor = Muted
+                                    )
                                 )
                             }
-                            TextButton(onClick = { showSettings = true }) { Text("Settings") }
+                        }
+                    }
+                ) { padding ->
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(padding)
+                            .background(Brush.verticalGradient(listOf(Color(0xFF0A1B30), Navy)))
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("DEFULTER AI", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text("VOICE  •  CHAT  •  AUTOMATION", style = MaterialTheme.typography.labelSmall, color = Cyan)
+                            }
+                            TextButton(onClick = { showSettings = true }) { Text("⚙ Settings", color = Cyan) }
                         }
 
-                        LazyColumn(
-                            modifier = Modifier.weight(1f).fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(messages) { message ->
+                        when (screen) {
+                            "Chat" -> {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Surface(
-                                        color = if (message.fromUser) Color(0xFF17445A) else Color(0xFF142338),
-                                        shape = RoundedCornerShape(16.dp),
-                                        modifier = Modifier.widthIn(max = 310.dp)
-                                    ) {
-                                        Text(
-                                            message.text,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(12.dp)
-                                        )
-                                    }
+                                    Box(
+                                        Modifier.size(76.dp).background(
+                                            Brush.radialGradient(listOf(Color(0xFF2B7897), Color(0xFF142B4A))),
+                                            CircleShape
+                                        ),
+                                        contentAlignment = Alignment.Center
+                                    ) { Text("D", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
                                 }
-                            }
-                            if (busy) item { Text("DEFULTER सोच रहा है…", color = Color(0xFF66D9EF)) }
-                        }
-
-                        pendingApp?.let { appName ->
-                            Surface(color = Color(0xFF28344A), shape = RoundedCornerShape(14.dp)) {
-                                Column(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                Text("AI BRAIN  •  GEMINI", color = Muted, style = MaterialTheme.typography.labelSmall)
+                                LazyColumn(
+                                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Text("Approval required", color = Color.White, style = MaterialTheme.typography.titleMedium)
-                                    Text("क्या आप \"$appName\" app खोलना चाहते हैं?", color = Color.White)
-                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Button(onClick = {
-                                            val target = pendingApp
-                                            pendingApp = null
-                                            if (target != null) {
-                                                val launched = launchInstalledApp(target)
-                                                messages.add(
-                                                    ChatMessage(
-                                                        if (launched) "$target खोल दिया गया।" else "$target app नहीं मिला।",
-                                                        false
-                                                    )
-                                                )
+                                    items(messages) { message ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start
+                                        ) {
+                                            Surface(
+                                                color = if (message.fromUser) Color(0xFF17445A) else Panel,
+                                                shape = RoundedCornerShape(16.dp),
+                                                modifier = Modifier.widthIn(max = 320.dp)
+                                            ) {
+                                                Text(message.text, color = Color.White, modifier = Modifier.padding(12.dp))
                                             }
-                                        }) { Text("Approve") }
-                                        OutlinedButton(onClick = {
-                                            pendingApp = null
-                                            messages.add(ChatMessage("Action cancelled.", false))
-                                        }) { Text("Cancel") }
+                                        }
+                                    }
+                                    if (busy) item { Text("DEFULTER सोच रहा है…", color = Cyan) }
+                                }
+
+                                pendingAction?.let { action ->
+                                    Surface(color = Color(0xFF20334B), shape = RoundedCornerShape(16.dp)) {
+                                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text("APPROVAL REQUIRED", color = Cyan, fontWeight = FontWeight.Bold)
+                                            Text(action.title, color = Color.White, style = MaterialTheme.typography.titleMedium)
+                                            Text(action.detail, color = Muted)
+                                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Button(onClick = {
+                                                    val approved = pendingAction
+                                                    pendingAction = null
+                                                    if (approved != null) {
+                                                        val resultText = runCatching { executeApprovedAction(approved) }.getOrElse { "Action शुरू नहीं हो पाया: ${it.message}" }
+                                                        addAssistant(resultText)
+                                                        saveHistory("${approved.title} — ${if (resultText.startsWith("हो गया")) "Completed" else resultText}")
+                                                    }
+                                                }) { Text("Approve") }
+                                                OutlinedButton(onClick = {
+                                                    pendingAction = null
+                                                    addAssistant("ठीक है, action cancel कर दिया।")
+                                                    saveHistory("${action.title} — Cancelled")
+                                                }) { Text("Cancel") }
+                                            }
+                                        }
                                     }
                                 }
-                            }
-                        }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = input,
-                                onValueChange = { input = it },
-                                modifier = Modifier.weight(1f),
-                                placeholder = { Text("Message DEFULTER…") },
-                                maxLines = 3
-                            )
-                            IconButton(onClick = {
-                                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
-                                    putExtra(RecognizerIntent.EXTRA_PROMPT, "बोलिए")
-                                }
-                                runCatching { voiceLauncher.launch(intent) }.onFailure {
-                                    messages.add(ChatMessage("इस device पर speech recognition उपलब्ध नहीं है।", false))
-                                }
-                            }) { Text("🎙", color = Color(0xFF66D9EF)) }
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = input,
+                                        onValueChange = { input = it },
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = { Text("Boss, message लिखें…") },
+                                        maxLines = 3,
+                                        shape = RoundedCornerShape(18.dp)
+                                    )
+                                    IconButton(onClick = {
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "DEFULTER AI को बोलिए")
+                                        }
+                                        runCatching { voiceLauncher.launch(intent) }.onFailure {
+                                            addAssistant("इस device पर speech recognition service उपलब्ध नहीं है।")
+                                        }
+                                    }) { Text("🎙", color = Cyan) }
+                                    Button(
+                                        enabled = input.isNotBlank() && !busy && pendingAction == null,
+                                        onClick = {
+                                            val prompt = input.trim()
+                                            input = ""
+                                            messages.add(ChatMessage(prompt, true))
+                                            val action = detectAction(prompt)
+                                            if (action != null) {
+                                                pendingAction = action
+                                                saveHistory("${action.title} — Waiting for approval")
+                                            } else {
+                                                busy = true
+                                                scope.launch {
+                                                    try {
+                                                        val memoryContext = memories.joinToString("\n")
+                                                        val fullPrompt = """
+                                                            You are DEFULTER AI, a concise Hindi/Hinglish Android assistant.
+                                                            Reply in the user's language, normally 1-3 useful sentences.
+                                                            Never claim a phone action has been performed. Phone actions require explicit in-app approval.
+                                                            Saved user preferences:
+                                                            $memoryContext
 
-                            Button(
-                                enabled = input.isNotBlank() && !busy && pendingApp == null,
-                                onClick = {
-                                    val prompt = input.trim()
-                                    input = ""
-                                    messages.add(ChatMessage(prompt, true))
-                                    val isOpenRequest = prompt.startsWith("open ", true) || prompt.startsWith("ओपन ")
-                                    if (isOpenRequest) {
-                                        val target = if (prompt.startsWith("ओपन ")) {
-                                            prompt.removePrefix("ओपन ").trim()
-                                        } else {
-                                            prompt.substringAfter(" ", "").trim()
-                                        }
-                                        if (target.isBlank()) {
-                                            messages.add(ChatMessage("किस app को खोलना है?", false))
-                                        } else {
-                                            pendingApp = target
-                                        }
-                                    } else {
-                                        busy = true
-                                        scope.launch {
-                                            try {
-                                                val answer = gemini.reply(apiKey, prompt)
-                                                messages.add(ChatMessage(answer, false))
-                                                if (speakReplies) {
-                                                    tts?.speak(answer, TextToSpeech.QUEUE_FLUSH, null, "defulter_reply")
+                                                            User: $prompt
+                                                        """.trimIndent()
+                                                        addAssistant(gemini.reply(apiKey, fullPrompt))
+                                                    } catch (error: Exception) {
+                                                        addAssistant(error.message ?: "कुछ गलत हुआ। Settings में Gemini API key जाँचें।")
+                                                    } finally {
+                                                        busy = false
+                                                    }
                                                 }
-                                            } catch (error: Exception) {
-                                                messages.add(ChatMessage(error.message ?: "कुछ गलत हुआ।", false))
-                                            } finally {
-                                                busy = false
+                                            }
+                                        }
+                                    ) { Text("Send") }
+                                }
+                                Text("Phone actions: Open app • Share • Navigation — हर action से पहले approval", color = Muted, style = MaterialTheme.typography.labelSmall)
+                            }
+                            "Memory" -> {
+                                Text("MEMORY", color = Cyan, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("DEFULTER की saved preferences यहाँ manage करें।", color = Muted)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(
+                                        value = memoryDraft,
+                                        onValueChange = { memoryDraft = it },
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = { Text("जैसे: मुझे छोटे Hindi जवाब पसंद हैं") },
+                                        maxLines = 2
+                                    )
+                                    Button(enabled = memoryDraft.isNotBlank(), onClick = {
+                                        memories.add(memoryDraft.trim())
+                                        prefs.edit().putStringSet("memories", memories.toSet()).apply()
+                                        memoryDraft = ""
+                                    }) { Text("Add") }
+                                }
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(memories.toList()) { memory ->
+                                        Surface(color = Panel, shape = RoundedCornerShape(12.dp)) {
+                                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                                Text(memory, color = Color.White, modifier = Modifier.weight(1f))
+                                                TextButton(onClick = {
+                                                    memories.remove(memory)
+                                                    prefs.edit().putStringSet("memories", memories.toSet()).apply()
+                                                }) { Text("Delete", color = Color(0xFFFF8A8A)) }
                                             }
                                         }
                                     }
                                 }
-                            ) { Text("Send") }
+                            }
+                            else -> {
+                                Text("TASK HISTORY", color = Cyan, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text("हाल के actions और approval status।", color = Muted)
+                                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    items(history.toList()) { entry ->
+                                        Surface(color = Panel, shape = RoundedCornerShape(12.dp)) {
+                                            Text(entry, color = Color.White, modifier = Modifier.fillMaxWidth().padding(12.dp))
+                                        }
+                                    }
+                                }
+                                if (history.isEmpty()) Text("अभी कोई task history नहीं है।", color = Muted)
+                            }
                         }
-                        Text(
-                            "Actions execute only after your approval. App launch is the first supported action.",
-                            color = Color.LightGray,
-                            style = MaterialTheme.typography.labelSmall
-                        )
                     }
                 }
 
@@ -213,24 +316,19 @@ class MainActivity : ComponentActivity() {
                     var draft by remember { mutableStateOf(apiKey) }
                     AlertDialog(
                         onDismissRequest = { showSettings = false },
-                        title = { Text("Settings") },
+                        title = { Text("DEFULTER Settings") },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Gemini API key")
-                                OutlinedTextField(
-                                    value = draft,
-                                    onValueChange = { draft = it },
-                                    placeholder = { Text("Paste API key") },
-                                    singleLine = true
-                                )
+                                OutlinedTextField(value = draft, onValueChange = { draft = it }, placeholder = { Text("Paste API key") }, singleLine = true)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = speakReplies, onCheckedChange = { speakReplies = it })
+                                    Checkbox(checked = speakReplies, onCheckedChange = {
+                                        speakReplies = it
+                                        prefs.edit().putBoolean("speak_replies", it).apply()
+                                    })
                                     Text("Speak replies")
                                 }
-                                Text(
-                                    "Key इस device की app preferences में रखी जाती है। इसे public या shared device पर न डालें।",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                Text("API key इस device पर local preferences में store होती है। इसे public repo या किसी के साथ share न करें।", style = MaterialTheme.typography.bodySmall)
                             }
                         },
                         confirmButton = {
@@ -240,24 +338,67 @@ class MainActivity : ComponentActivity() {
                                 showSettings = false
                             }) { Text("Save") }
                         },
-                        dismissButton = {
-                            TextButton(onClick = { showSettings = false }) { Text("Close") }
-                        }
+                        dismissButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } }
                     )
                 }
             }
         }
     }
 
-    private fun launchInstalledApp(query: String): Boolean {
-        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val matches = packageManager.queryIntentActivities(launcherIntent, 0)
-        val match = matches.firstOrNull { info ->
-            info.loadLabel(packageManager).toString().contains(query, ignoreCase = true)
-        } ?: return false
-        val launchIntent = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName) ?: return false
-        startActivity(launchIntent)
-        return true
+    private fun detectAction(text: String): PendingAction? {
+        val lower = text.lowercase(Locale.ROOT)
+        val openPrefix = listOf("open ", "ओपन ", "खोलो ", "खोल दो ")
+        val prefix = openPrefix.firstOrNull { lower.startsWith(it) }
+        if (prefix != null) {
+            val app = text.drop(prefix.length).trim()
+            if (app.isNotBlank()) return PendingAction("open", "Open app: $app", "DEFULTER "$app" app खोलने की कोशिश करेगा।", app)
+        }
+        val sharePrefix = listOf("share ", "शेयर ")
+        val share = sharePrefix.firstOrNull { lower.startsWith(it) }
+        if (share != null) {
+            val content = text.drop(share.length).trim()
+            if (content.isNotBlank()) return PendingAction("share", "Share message", "यह text Android share sheet में भेजा जाएगा:\n$content", content)
+        }
+        val navPrefixes = listOf("navigate to ", "directions to ", "रास्ता बताओ ", "नेविगेशन ")
+        val nav = navPrefixes.firstOrNull { lower.startsWith(it) }
+        if (nav != null) {
+            val destination = text.drop(nav.length).trim()
+            if (destination.isNotBlank()) return PendingAction("navigate", "Navigate to: $destination", "Google Maps या उपलब्ध maps app में destination खुलेगा।", destination)
+        }
+        return null
+    }
+
+    private fun executeApprovedAction(action: PendingAction): String {
+        when (action.kind) {
+            "open" -> {
+                val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                val matches = packageManager.queryIntentActivities(launcherIntent, 0)
+                val match = matches.firstOrNull { it.loadLabel(packageManager).toString().contains(action.value, true) }
+                    ?: return "${action.value} नाम का app नहीं मिला।"
+                val launchIntent = packageManager.getLaunchIntentForPackage(match.activityInfo.packageName)
+                    ?: return "इस app को launch नहीं कर पाया।"
+                startActivity(launchIntent)
+                return "हो गया — ${action.value} app खोल दिया।"
+            }
+            "share" -> {
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, action.value)
+                }
+                startActivity(Intent.createChooser(send, "DEFULTER AI — Share"))
+                return "हो गया — Android share sheet खोल दी।"
+            }
+            "navigate" -> {
+                val uri = Uri.parse("google.navigation:q=" + Uri.encode(action.value))
+                val mapIntent = Intent(Intent.ACTION_VIEW, uri)
+                if (mapIntent.resolveActivity(packageManager) == null) {
+                    mapIntent.data = Uri.parse("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(action.value))
+                }
+                startActivity(mapIntent)
+                return "हो गया — navigation खोल दिया।"
+            }
+        }
+        return "यह action अभी supported नहीं है।"
     }
 
     override fun onDestroy() {
