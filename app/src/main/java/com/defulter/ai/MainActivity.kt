@@ -351,7 +351,7 @@ class MainActivity : ComponentActivity() {
         val prefix = openPrefix.firstOrNull { lower.startsWith(it) }
         if (prefix != null) {
             val app = text.drop(prefix.length).trim()
-            if (app.isNotBlank()) return PendingAction("open", "Open app: $app", "DEFULTER \\"$app\\" app खोलने की कोशिश करेगा।", app)
+            if (app.isNotBlank()) return PendingAction("open", "Open app: $app", "DEFULTER \"$app\" app खोलने की कोशिश करेगा।", app)
         }
         val sharePrefix = listOf("share ", "शेयर ")
         val share = sharePrefix.firstOrNull { lower.startsWith(it) }
