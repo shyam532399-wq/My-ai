@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -21,6 +22,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -148,18 +157,14 @@ class MainActivity : ComponentActivity() {
 
                         when (screen) {
                             "Chat" -> {
-                                Row(
+                                Column(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    Box(
-                                        Modifier.size(76.dp).background(
-                                            Brush.radialGradient(listOf(Color(0xFF2B7897), Color(0xFF142B4A))),
-                                            CircleShape
-                                        ),
-                                        contentAlignment = Alignment.Center
-                                    ) { Text("D", color = Color.White, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold) }
+                                    AnimatedDefulterOrb()
+                                    Text("DEFULTER AI", color = Color.White, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                    Text("YOUR PERSONAL AI CORE", color = Cyan, style = MaterialTheme.typography.labelSmall)
                                 }
                                 Text("AI BRAIN  •  GEMINI", color = Muted, style = MaterialTheme.typography.labelSmall)
                                 LazyColumn(
@@ -406,5 +411,84 @@ class MainActivity : ComponentActivity() {
         tts?.shutdown()
         tts = null
         super.onDestroy()
+    }
+}
+
+
+@Composable
+private fun AnimatedDefulterOrb() {
+    val transition = rememberInfiniteTransition(label = "defulter_orb")
+    val rotation = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 9000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "orb_rotation"
+    )
+    val pulse = transition.animateFloat(
+        initialValue = 0.82f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "orb_pulse"
+    )
+    Canvas(Modifier.size(190.dp)) {
+        val center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+        val radius = size.minDimension * 0.39f
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0x553D3BFF), Color(0x33210C52), Color.Transparent),
+                center = center,
+                radius = radius * 1.75f
+            ),
+            radius = radius * 1.75f,
+            center = center
+        )
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0xFF141B42), Color(0xFF08091C), Color(0xFF03030D)),
+                center = center,
+                radius = radius * 1.2f
+            ),
+            radius = radius * 1.08f,
+            center = center
+        )
+        rotate(rotation.value) {
+            drawArc(
+                brush = Brush.sweepGradient(
+                    listOf(Color.Transparent, Color(0xFFE8F7FF), Color(0xFF9D7BFF), Color(0xFF52CFFF), Color.Transparent),
+                    center
+                ),
+                startAngle = 18f,
+                sweepAngle = 306f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - radius, center.y - radius),
+                size = androidx.compose.ui.geometry.Size(radius * 2f, radius * 2f),
+                style = Stroke(width = size.minDimension * 0.026f * pulse.value, cap = StrokeCap.Round)
+            )
+        }
+        rotate(-rotation.value * 1.35f) {
+            drawArc(
+                brush = Brush.sweepGradient(
+                    listOf(Color(0x00FFFFFF), Color(0xFFB5A0FF), Color(0xFF42C9FF), Color(0x00FFFFFF)),
+                    center
+                ),
+                startAngle = 205f,
+                sweepAngle = 260f,
+                useCenter = false,
+                topLeft = androidx.compose.ui.geometry.Offset(center.x - radius * 0.56f, center.y - radius * 0.56f),
+                size = androidx.compose.ui.geometry.Size(radius * 1.12f, radius * 1.12f),
+                style = Stroke(width = size.minDimension * 0.045f, cap = StrokeCap.Round)
+            )
+        }
+        drawCircle(
+            color = Color(0xFF9E80FF).copy(alpha = 0.12f * pulse.value),
+            radius = radius * 0.35f,
+            center = center
+        )
     }
 }
